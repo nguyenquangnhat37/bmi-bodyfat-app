@@ -1,0 +1,22 @@
+name: bmi_bodyfat_tracker
+description: Ứng dụng Android tính BMI, tỷ lệ mỡ cơ thể, lưu lịch sử bằng SQLite và hiển thị quảng cáo Google AdMob.
+publish_to: 'none'
+version: 1.1.0+2
+
+environment:
+  sdk: '>=3.2.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  sqflite: ^2.3.3
+  path: ^1.9.0
+  google_mobile_ads: ^5.2.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
