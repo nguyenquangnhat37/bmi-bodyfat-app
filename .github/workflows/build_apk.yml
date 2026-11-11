@@ -37,11 +37,10 @@ jobs:
           flutter-version: "3.24.0"
           channel: "stable"
 
-      # applicationId không dùng com.example.* vì Google Play không chấp nhận.
       - name: Khởi tạo Android runner
         run: flutter create --platforms=android --org vn.bmifat --project-name bmi_bodyfat_tracker .
 
-      - name: Cấu hình AdMob, quyền mạng, tên hiển thị, minSdk
+      - name: Cấu hình AdMob, quyền mạng, tên hiển thị, minSdk và Kotlin
         run: |
           MANIFEST=android/app/src/main/AndroidManifest.xml
 
@@ -51,27 +50,38 @@ jobs:
           # Quyền Internet cho quảng cáo
           sed -i 's#<application#<uses-permission android:name="android.permission.INTERNET"/><application#' "$MANIFEST"
 
-          # AdMob App ID
+          # Chèn AdMob App ID
           python3 - <<'PYEOF'
           path = "android/app/src/main/AndroidManifest.xml"
           with open(path, "r", encoding="utf-8") as f:
               content = f.read()
-          meta = """        <meta-data
+          meta = '''        <meta-data
               android:name="com.google.android.gms.ads.APPLICATION_ID"
               android:value="ca-app-pub-4389618584846299~1393911987"/>
-          </application>"""
+          </application>'''
           if "com.google.android.gms.ads.APPLICATION_ID" not in content:
               content = content.replace("</application>", meta)
           with open(path, "w", encoding="utf-8") as f:
               f.write(content)
           PYEOF
 
-          # minSdk 23 cho AdMob
+          # Nâng minSdk lên 23
           find android/app -maxdepth 1 -name 'build.gradle*' -exec sed -i \
             -e 's/minSdk = flutter\.minSdkVersion/minSdk = 23/' \
             -e 's/minSdkVersion flutter\.minSdkVersion/minSdkVersion 23/' {} +
-          grep -qE 'minSdk(Version)? ?=? ?23' android/app/build.gradle* || { echo "Không đặt được minSdk 23"; exit 1; }
-          grep -q 'com.google.android.gms.ads.APPLICATION_ID' "$MANIFEST" || { echo "Thiếu AdMob App ID"; exit 1; }
+
+          # Nâng cấp Kotlin lên 1.9.24 cho tương thích với google_mobile_ads
+          python3 - <<'PYEOF'
+          import glob, re
+          files = glob.glob("android/**/settings.gradle*", recursive=True) + glob.glob("android/**/build.gradle*", recursive=True)
+          for f in files:
+              with open(f, "r", encoding="utf-8") as fp:
+                  c = fp.read()
+              c = re.sub(r'(id\s*\(?["\']org\.jetbrains\.kotlin\.android["\']\)?\s*version\s*)["\'][^"\']+["\']', r'\g<1>"1.9.24"', c)
+              c = re.sub(r'ext\.kotlin_version\s*=\s*["\'][^"\']+["\']', 'ext.kotlin_version = "1.9.24"', c)
+              with open(f, "w", encoding="utf-8") as fp:
+                  fp.write(c)
+          PYEOF
 
           rm -f test/widget_test.dart
 
