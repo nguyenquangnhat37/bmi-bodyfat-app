@@ -1,0 +1,96 @@
+name: Build Android APK & Google Play AAB
+
+on:
+  push:
+    branches: ["main", "master"]
+  workflow_dispatch:
+    inputs:
+      use_test_ads:
+        description: "Dùng quảng cáo thử nghiệm (ID test của Google) cho bản build này"
+        type: boolean
+        default: false
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    env:
+      DART_DEFINES: "${{ github.event.inputs.use_test_ads == 'true' && '--dart-define=ADS_TEST=true' || '' }}"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Chuyển code ra thư mục gốc
+        run: |
+          if [ -d "bmi_bodyfat" ]; then
+            cp -r bmi_bodyfat/* .
+          fi
+          if [ -d "bmi_bodyfat_android_project" ]; then
+            cp -r bmi_bodyfat_android_project/* .
+          fi
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: "zulu"
+          java-version: "17"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.24.0"
+          channel: "stable"
+
+      # applicationId không dùng com.example.* vì Google Play không chấp nhận.
+      - name: Khởi tạo Android runner
+        run: flutter create --platforms=android --org vn.bmifat --project-name bmi_bodyfat_tracker .
+
+      - name: Cấu hình AdMob, quyền mạng, tên hiển thị, minSdk
+        run: |
+          MANIFEST=android/app/src/main/AndroidManifest.xml
+
+          # Tên hiển thị trên điện thoại
+          sed -i 's/android:label="[^"]*"/android:label="Đo BMI và mỡ"/' "$MANIFEST"
+
+          # Quyền Internet cho quảng cáo
+          sed -i 's#<application#<uses-permission android:name="android.permission.INTERNET"/><application#' "$MANIFEST"
+
+          # AdMob App ID
+          python3 - <<'PYEOF'
+          path = "android/app/src/main/AndroidManifest.xml"
+          with open(path, "r", encoding="utf-8") as f:
+              content = f.read()
+          meta = """        <meta-data
+              android:name="com.google.android.gms.ads.APPLICATION_ID"
+              android:value="ca-app-pub-4389618584846299~1393911987"/>
+          </application>"""
+          if "com.google.android.gms.ads.APPLICATION_ID" not in content:
+              content = content.replace("</application>", meta)
+          with open(path, "w", encoding="utf-8") as f:
+              f.write(content)
+          PYEOF
+
+          # minSdk 23 cho AdMob
+          find android/app -maxdepth 1 -name 'build.gradle*' -exec sed -i \
+            -e 's/minSdk = flutter\.minSdkVersion/minSdk = 23/' \
+            -e 's/minSdkVersion flutter\.minSdkVersion/minSdkVersion 23/' {} +
+          grep -qE 'minSdk(Version)? ?=? ?23' android/app/build.gradle* || { echo "Không đặt được minSdk 23"; exit 1; }
+          grep -q 'com.google.android.gms.ads.APPLICATION_ID' "$MANIFEST" || { echo "Thiếu AdMob App ID"; exit 1; }
+
+          rm -f test/widget_test.dart
+
+      - name: Cài thư viện
+        run: flutter pub get
+
+      - name: Chạy unit test
+        run: flutter test
+
+      - name: Build APK cài trực tiếp
+        run: flutter build apk --release --split-per-abi $DART_DEFINES
+
+      - name: Build AAB đăng lên Store
+        run: flutter build appbundle --release $DART_DEFINES
+
+      - name: Lưu file thành phẩm
+        uses: actions/upload-artifact@v4
+        with:
+          name: bmi-bodyfat-release-files
+          path: |
+            build/app/outputs/flutter-apk/*.apk
+            build/app/outputs/bundle/release/*.aab
